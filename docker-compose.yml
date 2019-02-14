@@ -1,0 +1,11 @@
+version: '3'
+services:
+        jenkins:
+                image: jenkinsci/blueocean
+                container_name: jenkins
+                user: root
+                restart: always
+                volumes:
+                 - "/data/jenkins/data:/var/jenkins_home"
+                 - "/data/jenkins/docker.sock:/var/run/docker.sock"
+                network_mode: "host"

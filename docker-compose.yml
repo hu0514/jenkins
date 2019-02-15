@@ -7,5 +7,5 @@ services:
                 restart: always
                 volumes:
                  - "/data/jenkins/data:/var/jenkins_home"
-                 - "/data/jenkins/docker.sock:/var/run/docker.sock"
+                 - "/var/run/docker.sock:/var/run/docker.sock"
                 network_mode: "host"

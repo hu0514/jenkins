@@ -1,0 +1,37 @@
+- hosts: 47.52.230.165
+  remote_user: root
+  tasks:
+  - name: yum install epel-release
+    yum: name=epel-release state=present
+  - name: install pip
+    yum: name=python-pip state=present
+  - name: install docker-py 
+    pip:
+      name: docker-py
+  - name: get docker-ce.repo
+    get_url: url=https://download.docker.com/linux/centos/docker-ce.repo dest=/etc/yum.repos.d/docker-ce.repo
+  - name: install docker 
+    yum: update_cache=yes
+    yum: name={{item}} state=present
+    with_items:
+     - yum-utils
+     - device-mapper-persistent-data
+     - lvm2
+     - containerd.io
+     - docker-ce-cli
+     - docker-ce
+  - name: start docker 
+    service: name=docker state=started
+  - name: pull tomcat image
+    docker:
+     name: tomcat
+     image: tomcat
+     pull: always
+  - name: stop tomcat container
+    shell: dockername=`docker ps|grep tomcat1.0|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker stop ${dockername}||echo "no container to stop"
+  - name: remove tomcat container
+    shell: dockername=`docker ps -a|grep tomcat1.0|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker rm  ${dockername}|| echo "no container to rm"
+  - name: send war file
+    copy: src=/data/workspace/D/target/DataCollect.war dest=/data/java/
+  - name: run a tomcat container
+    shell: docker run -d --name tomcat1.0 --network host -v /data/java:/mnt tomcat

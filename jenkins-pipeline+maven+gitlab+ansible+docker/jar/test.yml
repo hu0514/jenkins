@@ -1,0 +1,36 @@
+- hosts: 47.52.230.165
+  remote_user: root
+  tasks:
+  - name: yum install epel-release
+    yum: name=epel-release state=present
+  - name: install pip
+    yum: name=python-pip state=present
+  - name: install docker-py 
+    pip:
+      name: docker-py
+  - name: get docker-ce.repo
+    get_url: url=https://download.docker.com/linux/centos/docker-ce.repo dest=/etc/yum.repos.d/docker-ce.repo
+  - name: install docker 
+    yum: update_cache=yes
+    yum: name={{item}} state=present
+    with_items:
+     - yum-utils
+     - device-mapper-persistent-data
+     - lvm2
+     - containerd.io
+     - docker-ce-cli
+     - docker-ce
+  - name: start docker 
+    service: name=docker state=started
+  - name: pull java image
+    docker:
+     image: qq79428316/club-java:1.8.0_162
+     pull: always
+  - name: stop java container
+    shell: dockername=`docker ps|grep java-test|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker stop ${dockername}||echo "no container to stop"
+  - name: remove tomcat container
+    shell: dockername=`docker ps -a|grep java-test|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker rm  ${dockername}|| echo "no container to rm"
+  - name: send war file
+    copy: src=/data/workspace/D/target/eureka-server-1.0.0.jar dest=/data/java/
+  - name: run a tomcat container
+    shell: docker run -d --name java-test --network host -v /data/java:/mnt qq79428316/club-java:1.8.0_162 java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1

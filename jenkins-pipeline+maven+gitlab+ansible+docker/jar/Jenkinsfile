@@ -1,15 +1,17 @@
 pipeline{
     agent any
     environment{
-        def BUILD_USER=sh(returnStdout:true,script: "curl http://192.168.3.50:8080/job/机器人测试/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'")
-        def timestamp=sh(returnStdout:true,script: "curl http://192.168.3.50:8080/job/机器人测试/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'|awk '{print substr(\$1,1,10)}'")    
+        def BUILD_USER=sh(returnStdout:true,script: "curl http://192.168.3.50:8080/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'")
+        def timestamp=sh(returnStdout:true,script: "curl http://192.168.3.50:8080/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'|awk '{print substr(\$1,1,10)}'")    
         def BUILD_TIME=sh(returnStdout:true,script:"echo `date '+%Y-%m-%d %T %Z' -d @$timestamp `")
-        def TOKEN='2e7a689bd8794a2149d297d7f72a3f68f6023100acd4626cac0f35553730862c'  
+        def DINGTALK_TOKEN='2e7a689bd8794a2149d297d7f72a3f68f6023100acd4626cac0f35553730862c'  
+        def GIT_CRED_ID='03be43e2-f021-4089-904c-41aa427ea279'
+        def ASB_CRED_ID='93305ed6-fd67-4692-ad14-ff62d5365599'
     }
     post{
         always{
             sh """
-            curl 'https://oapi.dingtalk.com/robot/send?access_token=${TOKEN}' \
+            curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
                 -H 'Content-Type: application/json' \
                 -d '
                 {"msgtype": "markdown",
@@ -32,15 +34,17 @@ pipeline{
             steps{
                 dir(path:"./provider-comn"){
                     git (
+                        credentialsId: GIT_CRED_ID,
                         branch: 'master',
-                        url: 'git@github.com:hu0514/provider-comn.git',
+                        url: 'https://github.com/hu0514/provider-comn.git',
                         changelog: true
                     )
                 }
                 dir(path:"./eureka"){
                     git (
+                        credentialsId: GIT_CRED_ID,
                         branch: 'master',
-                        url: 'git@github.com:hu0514/eureka.git',
+                        url: 'https://github.com/hu0514/eureka.git',
                         changelog: true
                     )
                 }
@@ -57,14 +61,12 @@ pipeline{
             steps{
                 dir(path:"../eureka/provider-comn"){
                     sh '''
-                    pwd
                     mvn -v
                     mvn test
                     '''                    
                 }
                 dir(path:"../eureka/eureka"){
                     sh '''
-                    pwd
                     mvn -v
                     mvn test
                     '''                    
@@ -99,15 +101,39 @@ pipeline{
                     args '-v /data/ansible:/etc/ansible -v /data/jenkins/data:/data -e ANSIBLE_HOST_KEY_CHECKING=False'
                 }
             }
-            input {
-                id "立即发布"
-                message "是否发布?"
-                ok "立即发布."
-                submitter "test"
-            }
             steps{
-                sh "ansible-playbook /etc/ansible/test.yml" 
+                sh """
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                    -H 'Content-Type: application/json' \
+                    -d '
+                    {"msgtype": "markdown",
+                        "markdown": {"title":"测试机器人-构建${currentBuild.currentResult}",
+                            "text":"## 测试机器人-构建${currentBuild.currentResult}\n\n 执行任务: 单元测试+构建+部署\n\n 构建时间: ${BUILD_TIME}\n\n 项目名称: ${JOB_NAME}\n\n 构建编号: ${BUILD_DISPLAY_NAME}\n\n 版本作者: ${BUILD_USER}\n\n 版本状态: ${currentBuild.currentResult}\n\n ### @18817810841\n\n ### 请登录jnekins确认是否发布\n\n[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                        },
+                        "at":{
+                            "atMobiles":[
+                                "18817810841"
+                            ],
+                            "isAtAll":false
+                        }
+                    }
+                    '
+                """  
+                input(
+                    id: '立即发布',
+                    message: '是否发布?',
+                    ok: '立即发布.',
+                )
+                ansiColor('xterm') {
+                    ansiblePlaybook(
+                        playbook: '/etc/ansible/test.yml',
+                        inventory: '/etc/ansible/hosts',
+                        credentialsId: ASB_CRED_ID,
+                        colorized: true
+                    )
+                }
             }
+
         }
             
     }

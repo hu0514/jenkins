@@ -8,4 +8,5 @@ services:
                 volumes:
                  - "/data/jenkins/data:/var/jenkins_home"
                  - "/var/run/docker.sock:/var/run/docker.sock"
+                 - "/etc/localtime:/etc/localtime"
                 network_mode: "host"

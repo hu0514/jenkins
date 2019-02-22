@@ -1,18 +1,22 @@
 - hosts: 47.52.230.165
   remote_user: root
   tasks:
-  - name: yum install epel-release
+  - name: Print Host Name
+    debug: msg={{ inventory_hostname }}
+  - name: Install epel-release
     yum: name=epel-release state=present
-  - name: install pip
+  - name: Install pip
     yum: name=python-pip state=present
-  - name: install docker-py 
+  - name: Install docker-py 
     pip:
       name: docker-py
-  - name: get docker-ce.repo
+  - name: Get docker-ce.repo
     get_url: url=https://download.docker.com/linux/centos/docker-ce.repo dest=/etc/yum.repos.d/docker-ce.repo
-  - name: install docker 
-    yum: update_cache=yes
-    yum: name={{item}} state=present
+  - name: Install Docker
+    yum: 
+     name: "{{item}}" 
+     state: present
+     update_cache: yes
     with_items:
      - yum-utils
      - device-mapper-persistent-data
@@ -20,17 +24,31 @@
      - containerd.io
      - docker-ce-cli
      - docker-ce
-  - name: start docker 
+  - name: Start Docker Service
     service: name=docker state=started
-  - name: pull java image
+  - name: Pull An Java Image version=1.8.0_162
     docker:
      image: qq79428316/club-java:1.8.0_162
      pull: always
-  - name: stop java container
-    shell: dockername=`docker ps|grep java-test|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker stop ${dockername}||echo "no container to stop"
-  - name: remove tomcat container
-    shell: dockername=`docker ps -a|grep java-test|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker rm  ${dockername}|| echo "no container to rm"
-  - name: send war file
+  - name: Stop Java Container
+    shell: dockername=`docker ps|grep {{ lookup('env','JOB_NAME') }}|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker stop ${dockername}||echo "no container to stop"
+  - name: Wait For Java Container Down
+    wait_for:
+     port: 80
+     state: stopped
+  - name: Remove Java Container
+    shell: dockername=`docker ps -a|grep {{ lookup('env','JOB_NAME') }}|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker rm -f ${dockername}|| echo "no container to rm"
+  - name: Send Jar File
     copy: src=/data/workspace/D/target/eureka-server-1.0.0.jar dest=/data/java/
-  - name: run a tomcat container
-    shell: docker run -d --name java-test --network host -v /data/java:/mnt qq79428316/club-java:1.8.0_162 java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1
+  - name: Run A Java Container
+    shell: docker run -d --name {{ lookup('env','JOB_NAME') }} --network host -v /data/java:/mnt qq79428316/club-java:1.8.0_162 java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1
+  - name: Wait For Java Container Up
+    wait_for:
+     port: 80
+     state: started
+     timeout: 600
+  - name: Get Service Status
+    uri:
+     url: http://47.52.230.165
+  - name: Print Service Status
+    debug: msg="UP"

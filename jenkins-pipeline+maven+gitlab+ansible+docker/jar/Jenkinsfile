@@ -1,12 +1,13 @@
 pipeline{
     agent any
     environment{
-        def BUILD_USER=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'")
-        def timestamp=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{print substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{print \$1}'|awk '{print substr(\$1,1,10)}'")    
+        def BUILD_USER=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf \$1}'")
+        def timestamp=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf substr(\$1,1,10)}'")
         def BUILD_TIME=sh(returnStdout:true,script:"echo `date '+%Y-%m-%d %T %Z' -d @$timestamp `")
         def DINGTALK_TOKEN='2e7a689bd8794a2149d297d7f72a3f68f6023100acd4626cac0f35553730862c'  
         def GIT_URL='https://github.com/hu0514/eureka.git'
         def BRANCH='master'
+        def GIT_NAME=sh(returnStdout:true,script:"echo ${GIT_URL}|awk -F'[:/.]' '{printf \$(NF-1)}'")
         def GIT_CRED_ID='03be43e2-f021-4089-904c-41aa427ea279'
         def ASB_CRED_ID='93305ed6-fd67-4692-ad14-ff62d5365599'
         def AtUser='18817810841'
@@ -43,7 +44,7 @@ pipeline{
                         changelog: true
                     )
                 }
-                dir(path:"./eureka"){
+                dir(path:"./${GIT_NAME}"){
                     git (
                         credentialsId: GIT_CRED_ID,
                         branch: BRANCH,
@@ -62,13 +63,13 @@ pipeline{
                 }
             }
             steps{
-                dir(path:"../eureka/provider-comn"){
+                dir(path:"../${JOB_NAME}/provider-comn"){
                     sh '''
                     mvn -v
                     mvn test
                     '''                    
                 }
-                dir(path:"../eureka/eureka"){
+                dir(path:"../${JOB_NAME}/${GIT_NAME}"){
                     sh '''
                     mvn -v
                     mvn test
@@ -84,13 +85,13 @@ pipeline{
                 }
             }
             steps{
-                dir(path:"../eureka/provider-comn"){
+                dir(path:"../${JOB_NAME}/provider-comn"){
                     sh 'mvn install'
                 }
-                dir(path:"../eureka/eureka"){
+                dir(path:"../${JOB_NAME}/${GIT_NAME}"){
                      sh '''
                         mvn -B -DskipTests clean package
-                        ls target/*.jar
+                        pwd target/*.jar
                     '''                   
                 }
 

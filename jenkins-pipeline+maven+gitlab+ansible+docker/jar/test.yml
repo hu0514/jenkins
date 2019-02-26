@@ -4,9 +4,13 @@
   - name: Print Host Name
     debug: msg={{  ansible_nodename  }}
   - name: Install epel-release
-    yum: name=epel-release state=present
+    yum: 
+     name: epel-release 
+     state: present
   - name: Install pip
-    yum: name=python-pip state=present
+    yum: 
+     name: python-pip 
+     state: present
   - name: Install docker-py 
     pip:
       name: docker-py
@@ -25,23 +29,36 @@
      - docker-ce-cli
      - docker-ce
   - name: Start Docker Service
-    service: name=docker state=started
+    service: 
+     name: docker 
+     state: started
   - name: Pull An Java Image version=1.8.0_162
     docker:
      image: qq79428316/club-java:1.8.0_162
      pull: always
-  - name: Stop Java Container
-    shell: dockername=`docker ps|grep {{ lookup('env','JOB_NAME') }}|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker stop ${dockername}||echo "no container to stop"
+  - name: Stop Jave Container
+    uri:
+     url: http://{{ ansible_default_ipv4.address }}/actuator/shutdown
+     method: POST
+    ignore_errors: yes
   - name: Wait For Java Container Down
     wait_for:
      port: 80
      state: stopped
   - name: Remove Java Container
-    shell: dockername=`docker ps -a|grep {{ lookup('env','JOB_NAME') }}|awk '{print $1}'`&& [ -n "${dockername}" ]&& docker rm -f ${dockername}|| echo "no container to rm"
+    docker_container:
+     name: "{{ lookup('env','JOB_NAME') }}"
+     state: absent
   - name: Send Jar File
-    copy: src=/data/workspace/{{ lookup('env','JOB_NAME') }}/{{ lookup('env','GIT_NAME') }}/target/eureka-server-1.0.0.jar dest=/data/java/
+    copy: src=/mnt/workspace/{{ lookup('env','JOB_NAME') }}/{{ lookup('env','GIT_NAME') }}/target/eureka-server-1.0.0.jar dest=/data/java/
   - name: Run A Java Container
-    shell: docker run -d --name {{ lookup('env','JOB_NAME') }} --network host -v /data/java:/mnt qq79428316/club-java:1.8.0_162 java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1
+    docker_container:
+     name: "{{ lookup('env','JOB_NAME') }}"
+     image: qq79428316/club-java:1.8.0_162
+     network_mode: host
+     volumes:
+       - "/data/java:/mnt"
+     command: java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1
   - name: Wait For Java Container Up
     wait_for:
      port: 80

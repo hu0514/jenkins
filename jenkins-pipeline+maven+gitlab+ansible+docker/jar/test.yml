@@ -36,15 +36,19 @@
     docker:
      image: qq79428316/club-java:1.8.0_162
      pull: always
-  - name: Stop Jave Container
+  - name: Gracefully Halting
     uri:
-     url: http://{{ ansible_default_ipv4.address }}/actuator/shutdown
+     url: http://127.0.0.1/actuator/shutdown
      method: POST
+    register: result
     ignore_errors: yes
   - name: Wait For Java Container Down
     wait_for:
      port: 80
      state: stopped
+  - name: Print Gracefully Halting Status
+    debug:
+     var: result
   - name: Remove Java Container
     docker_container:
      name: "{{ lookup('env','JOB_NAME') }}"
@@ -56,6 +60,7 @@
      name: "{{ lookup('env','JOB_NAME') }}"
      image: qq79428316/club-java:1.8.0_162
      network_mode: host
+     restart_policy: always
      volumes:
        - "/data/java:/mnt"
      command: java -server -jar /mnt/eureka-server-1.0.0.jar --spring.profiles.active=dev_cluster1

@@ -1,0 +1,30 @@
+- hosts: 47.52.230.165
+  remote_user: root
+  tasks:
+   - name: Install Rsync
+     yum:
+      name: rsync
+      state: present
+   - name: Create project directory
+     file:
+      path: /tmp/projectdirectory
+      state: directory
+   - name: Create Temp directory
+     file:
+      path: /tmp/tmpdirectory
+      state: directory
+   - name: Sent project package
+     unarchive:
+      src: /data/workspace/rsync-test/dist/test-kefu-node-boss.tar.gz
+      dest: /tmp/tmpdirectory
+   - name: Rsync code
+     shell: rsync -av --delete /tmp/tmpdirectory/ /tmp/projectdirectory/
+     register: rsyncresult
+   - name: Print rsync status
+     debug:
+      msg: "{{rsyncresult.stdout_lines}}"
+   - name: Remove tmp directory
+     file:
+      path: /tmp/tmpdirectory
+      state: absent
+

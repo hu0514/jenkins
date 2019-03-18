@@ -1,0 +1,18 @@
+test-kefu-java-eureka_cluster1 ansible_host=47.52.230.165 
+test-kefu-java-config-server ansible_host=47.52.230.165
+test-kefu-java-gateway ansible_host=47.52.230.165
+test-kefu-node-boss ansible_host=47.52.230.165
+test-kefu-node-front ansible_host=47.52.230.165
+test-kefu-java-provider-acd ansible_host=47.52.230.165
+test-kefu-java-provider-ai ansible_host=47.52.230.165
+test-kefu-java-provider-cms ansible_host=47.52.230.165
+test-kefu-java-provider-auth ansible_host=47.52.230.165
+test-kefu-java-provider-etl ansible_host=47.52.230.165
+test-kefu-java-provider-fs ansible_host=47.52.230.165
+test-kefu-java-provider-im ansible_host=47.52.230.165
+test-kefu-java-provider-msg ansible_host=47.53.340.165
+test-kefu-java-provider-qi ansible_host=47.52.230.165
+u
+test-kefu-java-provider-work ansible_host=4.
+[test]
+47.52.230.165

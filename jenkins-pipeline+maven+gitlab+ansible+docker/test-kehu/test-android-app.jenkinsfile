@@ -1,5 +1,5 @@
 pipeline{
-    agent any
+    agent {label 'master'}
     environment{
         def BUILD_USER=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf \$1}'")
         def timestamp=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf substr(\$1,1,10)}'")
@@ -15,7 +15,6 @@ pipeline{
         //apk
         def project_subdir='RunX'
         def package_env='ceshi'
-        def apk_name=sh(returnStdout:true,script:"ls ${GIT_NAME}/${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk")
     }
     post{
         failure{
@@ -101,7 +100,8 @@ pipeline{
         stage('build'){
             agent {
                 docker {
-                    image 'android:test'
+                    image '18817810841/android:latest'
+                    label 'master'
                     args '-v /data/android/gradle:/root/.gradle'
                 }
             }
@@ -109,6 +109,13 @@ pipeline{
                 dir(path:"../${JOB_NAME}/${GIT_NAME}"){
                         sh "cd RunX && chmod +x gradlew && ./gradlew -g /root/.gradle clean assembleRunx${package_env}"
                         androidLint pattern: '**/lint-results-*.xml'
+                        script{
+                            env.apk_name=sh(
+                                script: "cd ..&&ls ${GIT_NAME}/${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk",
+                                returnStdout: true
+                            ).trim()
+                        }
+                        sh "echo ${apk_name}"
                     }
                 }
             }

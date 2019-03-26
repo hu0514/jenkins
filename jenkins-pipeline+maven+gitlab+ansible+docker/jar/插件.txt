@@ -1,3 +1,2 @@
 Ansible
 AnsiColor
-Build Timestamp

@@ -94,7 +94,7 @@
 
   - name: Send Jar File
     copy:
-      src: "/mnt/workspace/{{job_name}}/{{jar_path}}"
+      src: "/mnt/workspace/{{job_name}}/{{git_name}}/{{jar_path}}"
       dest: /data/java/
 
   - name: Send Fluentd File

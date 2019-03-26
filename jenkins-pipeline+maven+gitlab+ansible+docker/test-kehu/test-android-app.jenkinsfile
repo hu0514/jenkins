@@ -1,82 +1,21 @@
 pipeline{
-    agent {label 'master'}
+    agent none
     environment{
-        def BUILD_USER=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<userId>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf \$1}'")
-        def timestamp=sh(returnStdout:true,script: "curl ${JENKINS_URL}/job/${JOB_NAME}/${BUILD_ID}/api/xml|awk '{match(\$0,\"<timestamp>\")}{printf substr(\$0,RSTART+RLENGTH)}' | awk -F \"<\" '{printf substr(\$1,1,10)}'")
-        def BUILD_TIME=sh(returnStdout:true,script:"echo `date '+%Y-%m-%d %T %Z' -d @$timestamp `")
         //dingding
         def DINGTALK_TOKEN='2e7a689bd8794a2149d297d7f72a3f68f6023100acd4626cac0f35553730862c'  
         def AtUser='18817810841'
         // gitlab 
         def GIT_URL='http://gitlab.runxsports.com/android/runxsports.git'
         def BRANCH='test'
-        def GIT_NAME=sh(returnStdout:true,script:"echo ${GIT_URL}|awk -F'[:/.]' '{printf \$(NF-1)}'")
         def GIT_CRED_ID='927fc9e4-0150-4633-a33e-32835e7a1238'
         //apk
         def project_subdir='RunX'
         def package_env='ceshi'
     }
-    post{
-        failure{
-            sh """
-            curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
-                -H 'Content-Type: application/json' \
-                -d '
-                {"msgtype": "markdown",
-                    "markdown": {"title":"${JOB_NAME}-构建${currentBuild.currentResult}",
-                        "text":"### ${JOB_NAME}-构建${currentBuild.currentResult}
-##### 执行任务: 测试+构建+部署
-&nbsp;&nbsp;
-##### 构建时间: ${BUILD_TIME}
-&nbsp;&nbsp;
-##### 项目名称: ${JOB_NAME}
-&nbsp;&nbsp;
-##### 构建编号: ${BUILD_DISPLAY_NAME}
-&nbsp;&nbsp;
-##### 版本编号: ${git_commit_id}
-&nbsp;&nbsp;
-##### 版本作者: ${git_author} 
-&nbsp;&nbsp;
-##### 版本状态: ${currentBuild.currentResult} 
-[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
-                    }
-                }
-                '
-            """
-        }
-        success{
-            sh """
-            curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
-                -H 'Content-Type: application/json' \
-                -d '
-                {"msgtype": "markdown",
-                    "markdown": {"title":"${JOB_NAME}-构建${currentBuild.currentResult}",
-                        "text":"![screenshot](https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${JENKINS_URL}job/${JOB_NAME}/${BUILD_NUMBER}/artifact/${apk_name})
-### ${JOB_NAME}-构建${currentBuild.currentResult}
-##### 执行任务: 测试+构建+部署
-&nbsp;&nbsp;
-##### 构建时间: ${BUILD_TIME}
-&nbsp;&nbsp;
-##### 项目名称: ${JOB_NAME}
-&nbsp;&nbsp;
-##### 构建编号: ${BUILD_DISPLAY_NAME}
-&nbsp;&nbsp;
-##### 版本编号: ${git_commit_id}
-&nbsp;&nbsp;
-##### 版本作者: ${git_author} 
-&nbsp;&nbsp;
-##### 版本状态: ${currentBuild.currentResult} 
-[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
-                    }
-                }
-                '
-            """
-        }
-    }
     stages{
         stage('get code'){
+            agent {label 'master'}
             steps{
-                dir(path:"./${GIT_NAME}"){
                     git (
                         credentialsId: GIT_CRED_ID,
                         branch: BRANCH,
@@ -93,8 +32,6 @@ pipeline{
                             returnStdout:true
                         ).trim()
                     }
-                }
-
             }
         }
         stage('build'){
@@ -106,24 +43,108 @@ pipeline{
                 }
             }
             steps{
-                dir(path:"../${JOB_NAME}/${GIT_NAME}"){
                         sh "cd RunX && chmod +x gradlew && ./gradlew -g /root/.gradle clean assembleRunx${package_env}"
                         androidLint pattern: '**/lint-results-*.xml'
                         script{
                             env.apk_name=sh(
-                                script: "cd ..&&ls ${GIT_NAME}/${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk",
+                                script: "ls ${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk",
                                 returnStdout: true
                             ).trim()
                         }
                         sh "echo ${apk_name}"
-                    }
+            }
+            post{
+                failure{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-打包${currentBuild.currentResult}",
+                                "text":"### ${JOB_NAME}-打包${currentBuild.currentResult}
+##### 执行任务: Android打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
                 }
             }
+        }
         stage('Artifact'){
-              steps {
-                    sh "echo ${apk_name}"
-                    archiveArtifacts artifacts: "${GIT_NAME}/${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk", fingerprint: true, onlyIfSuccessful: true
-              }            
+            agent {label 'master'}
+            steps {
+                archiveArtifacts artifacts: "${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk", fingerprint: true, onlyIfSuccessful: true
+            }
+            post{
+                failure{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-打包${currentBuild.currentResult}",
+                                "text":"### ${JOB_NAME}-打包${currentBuild.currentResult}
+##### 执行任务: Android打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
+                }
+                success{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-打包${currentBuild.currentResult}",
+                                "text":"![screenshot](https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${JENKINS_URL}job/${JOB_NAME}/${BUILD_NUMBER}/artifact/${apk_name})
+### ${JOB_NAME}-打包${currentBuild.currentResult}
+##### 执行任务: Android打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
+                }
+            }
         }
     }
 }

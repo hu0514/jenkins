@@ -10,7 +10,6 @@ pipeline{
         def GIT_CRED_ID='927fc9e4-0150-4633-a33e-32835e7a1238'
         //ipa
         def project_subdir='runxproject'
-        def package_env='ceshi'
     }
     stages{
         stage('get code'){

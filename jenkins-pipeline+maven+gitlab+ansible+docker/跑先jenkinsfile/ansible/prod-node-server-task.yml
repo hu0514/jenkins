@@ -1,0 +1,128 @@
+---
+- name: Ansible Deploy prod-node-server-task.yml
+  vars:
+    host: "{{ lookup('env','JOB_NAME') }}"
+    fluentd_folder: "{{ lookup('env','log_folder') }}"
+    fluentd_project: "{{ lookup('env','JOB_BASE_NAME') }}"
+    work_path: "{{ lookup('env','WORKSPACE') }}"
+    branch: "{{ lookup('env','branch') }}"
+    package_name: "{{ lookup('env','JOB_NAME') }}"
+    project_path: "{{ lookup('env','project_path') }}"
+    project_port: "{{ lookup('env','project_port') }}"
+    build_id: "{{ lookup('env','BUILD_ID') }}"
+    fluentd_version: v1.2.6
+    fluentd_config: prod-fluent-client.conf
+  hosts: "{{ host }}"
+  remote_user: root
+  gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+  - name: Install epel-release
+    yum:
+      name: 
+        - epel-release
+
+  - name: Install JQ and Pip and glances
+    yum:
+      name: 
+        - jq
+        - python-pip
+        - glances
+        - rsync
+
+  - name: Install docker-py
+    pip:
+      name: docker-py
+
+  - name: Create project directory
+    file:
+      path: "{{ project_path }}"
+      state: directory
+
+  - name: Create tmp directory
+    file:
+      path: "/root/tmp/{{ package_name }}"
+      state: directory
+
+  - name: Send Project Package {{ package_name }}.tar.gz
+    unarchive:
+      src: "{{ work_path }}/dist/{{ package_name }}.tar.gz"
+      dest: "/root/tmp/{{ package_name }}"
+      owner: root
+      group: root
+
+  - name: Rsync Project File
+    shell: "rsync -av --delete /root/tmp/{{ package_name }}/ {{ project_path }}"
+    register: rsync_stats
+
+  - name: Print Rsync Status
+    debug:
+      msg: "{{ rsync_stats.stdout_lines }}"
+
+  - name: Remove tmp directory
+    file:
+      path: "/root/tmp/{{ package_name }}"
+      state: absent
+
+  - name: Save Build ID 
+    shell: "echo {{ build_id }} > /data/usr-data/build_id"
+
+  - name: Create Fluentd Config Directory
+    file:
+      path: /data/usr-data/fluentd
+      state: directory
+
+  - name: Send Fluentd Config file
+    copy:
+      src: "/data/ansible/fluentd/{{ fluentd_config }}"
+      dest: /data/usr-data/fluentd/fluent-client.conf
+
+  - name: Start Fluentd Client Container
+    docker_container:
+      name: "fluentd-client"
+      image: "fluent/fluentd:{{ fluentd_version }}"
+      network_mode: host
+      restart_policy: always
+      state: started
+      recreate: yes
+      volumes:
+        - /data/usr-data/fluentd/fluent-client.conf:/fluentd/etc/fluent.conf
+        - /etc/localtime:/etc/localtime
+
+  - name: Wait for fluentd container up
+    wait_for: 
+      port: 24224
+      timeout: 120
+      msg: 24224 Port startup failed of the 120 seconds
+
+  - name: Start Node Docker Container
+    docker_container:
+      name: "{{ package_name }}-{{ groups[host].index(inventory_hostname)+1 }}"
+      image: node:8.11.1
+      network_mode: host
+      restart_policy: always
+      # restart_retries: 10
+      state: started
+      recreate: yes
+      env:
+        PUBLIC_ENV: "{{ branch }}"
+        fluentd-folder: "{{ fluentd_folder }}"
+        fluentd-project: "{{ fluentd_project }}"
+      log_driver: fluentd
+      log_options:
+        fluentd-address: "localhost:24224"
+        fluentd-async-connect: "true"
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "3000"
+        env: "fluentd-folder,fluentd-project"
+      volumes:
+        - /data/usr-data:/data/usr-data
+      command: "node {{ project_path }}/server.js"
+
+  - name: Wait for node container up
+    wait_for: 
+      port: "{{ project_port }}"
+      timeout: 120
+      msg: "{{ project_port }} Port startup failed of the 120 seconds"

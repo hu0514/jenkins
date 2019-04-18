@@ -1,0 +1,207 @@
+---
+- name: Ansible Deploy dev-java-task.yml
+  vars:
+    host: "{{ lookup('env','JOB_NAME') }}"
+    fluentd_folder: "{{ lookup('env','log_folder') }}"
+    fluentd_project: "{{ lookup('env','JOB_BASE_NAME') }}"
+    log_path: "{{ lookup('env','java_log_path') }}"
+    jar_path: "{{ lookup('env','WORKSPACE') }}/{{ lookup('env','jar_path') }}"
+    jar_name: "{{ lookup('env','jar_name') }}"
+    jar_base_name: "{{ lookup('env','jar_base_name') }}"
+    build_id: "{{ lookup('env','BUILD_ID') }}"
+    spring_profiles: "{{ lookup('env','spring_profiles') }}"
+    java_version: "{{ lookup('env','docker_java_version') }}"
+    fluentd_version: v1.2.6
+    fluentd_config: dev-fluent-client.conf
+  hosts: "{{ host }}"
+  remote_user: root
+  # gather_facts: false
+  any_errors_fatal: true
+  serial: 1
+
+  tasks:
+  - name: Print Host Name
+    debug:
+      msg: "{{ ansible_hostname }}"
+  
+  - name: Install epel-release
+    yum:
+      name: 
+        - epel-release
+
+  - name: Install JQ and Pip and glances
+    yum:
+      name: 
+        - jq
+        - python-pip
+        - glances
+
+  - name: Install docker-py
+    pip:
+      name: docker-py
+
+  - name: Chmod Docker Sock 
+    file:
+      path: /var/run/docker.sock
+      mode: 0666
+
+  - name: "Pull an Java Image version = {{ java_version }}"
+    docker_image:
+      name: "qq79428316/club-java:{{ java_version }}"
+      http_timeout: 300
+    register: result
+    until: result | success
+    retries: 20
+    delay: 5
+
+  - name: Pull an Fluentd Image
+    docker_image:
+      name: "fluent/fluentd:{{ fluentd_version }}"
+      http_timeout: 300
+    register: result
+    until: result | success
+    retries: 20
+    delay: 5
+
+  - name: Gracefully Halting 
+    uri:
+      url: "http://127.0.0.1/actuator/shutdown"
+      method: POST
+      return_content: yes
+      status_code: 200
+    register: shutdown_stats
+    until: shutdown_stats.status is defined and shutdown_stats.status == 200
+    retries: 2
+    delay: 5
+    ignore_errors: yes
+
+  - name: Wait for java container down
+    wait_for: 
+      port: 80
+      state: stopped
+      timeout: 120
+      msg: 80 Port stop failed of the 120 seconds
+    ignore_errors: yes
+
+  - name: Print Gracefully Halting Status
+    debug:
+      msg: "{{ shutdown_stats }}"
+    ignore_errors: yes
+
+  - name: Remove All Java Container
+    docker:
+      image: "qq79428316/club-java:{{ java_version }}"
+      state: absent
+
+  - name: Send jar file
+    copy:
+      src: "{{ jar_path }}"
+      dest: /data/usr-data
+
+  - name: Save Build ID 
+    shell: "echo {{ build_id }} > /data/usr-data/build_id"
+
+  - name: Create Fluentd Config Directory
+    file:
+      path: /data/usr-data/fluentd
+      state: directory
+
+  - name: Send Fluentd Config file
+    copy:
+      src: "/data/ansible/fluentd/{{ fluentd_config }}"
+      dest: /data/usr-data/fluentd/fluent-client.conf
+
+  - name: Start Fluentd Client Container
+    docker_container:
+      name: "fluentd-client"
+      image: "fluent/fluentd:{{ fluentd_version }}"
+      network_mode: host
+      restart_policy: always
+      state: started
+      recreate: yes
+      volumes:
+        - /data/usr-data/fluentd/fluent-client.conf:/fluentd/etc/fluent.conf
+        - /etc/localtime:/etc/localtime
+
+  - name: Wait for fluentd container up
+    wait_for: 
+      port: 24224
+      timeout: 120
+      msg: 24224 Port startup failed of the 120 seconds
+
+  - name: Start Java Container
+    docker_container:
+      name: "{{ ansible_hostname }}"
+      image: "qq79428316/club-java:{{ java_version }}"
+      network_mode: host
+      # restart_policy: on-failure
+      # restart_retries: 1
+      state: started
+      # recreate: yes
+      env:
+        fluentd-folder: "{{ fluentd_folder }}"
+        fluentd-project: "{{ fluentd_project }}"
+      log_driver: fluentd
+      log_options:
+        fluentd-address: "localhost:24224"
+        fluentd-async-connect: "true"
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "3000"
+        tag: "{{ fluentd_project }}"
+        env: "fluentd-folder,fluentd-project"
+      volumes:
+        - /data/usr-data:/data/usr-data
+      command: java -server -jar
+                  -Xmx{{ ansible_memtotal_mb // 4 }}m
+                  -Xms{{ ansible_memtotal_mb // 4 }}m
+                  -Xmn{{ ansible_memtotal_mb // 6 }}m
+                  -Xss{% if ansible_memtotal_mb < 2000 %}256k{% else %}1m{% endif %}
+                  -XX:SurvivorRatio=8
+                  -XX:+UseParallelGC
+                  -XX:+UseParallelOldGC
+                  -XX:ParallelGCThreads={{ ansible_processor_vcpus }}
+                  -XX:MetaspaceSize={{ ansible_memtotal_mb // 8 }}m
+                  -XX:MaxMetaspaceSize={{ ansible_memtotal_mb // 4 }}m
+                  -XX:MaxTenuringThreshold=7
+                  -Dcom.sun.management.jmxremote
+                  -Dcom.sun.management.jmxremote.port=9010
+                  -Dcom.sun.management.jmxremote.local.only=false
+                  -Dcom.sun.management.jmxremote.authenticate=false
+                  -Dcom.sun.management.jmxremote.ssl=false
+                  /data/usr-data/{{ jar_name }}
+                  --spring.profiles.active={{ spring_profiles }}
+
+  - name: Wait for java container up
+    wait_for: 
+      port: 80
+      timeout: 120
+      msg: 80 Port startup failed of the 120 seconds
+
+  - name: Get Service Status
+    shell: "curl http://127.0.0.1/actuator/health | jq .status"
+    register: service_stats
+    until: service_stats.stdout.find("UP") != -1
+    retries: 15
+    delay: 30
+
+  - name: Print Service Status
+    debug:
+      msg: "{{ service_stats.stdout  }}"
+
+  - name: Send Jstatd Config file
+    copy:
+      src: /data/ansible/java/jstatd.policy
+      dest: /data/usr-data/jstatd.policy
+
+  - name: Run Jstatd
+    shell: "docker exec {{ ansible_hostname }} nohup jstatd -p10003 -J-Djava.security.policy=/data/usr-data/jstatd.policy &"
+
+  - name: Wait for Jstatd up
+    wait_for: 
+      port: 10003
+      timeout: 120
+      msg: 10003 Port startup failed of the 120 seconds
+
+  - name: Sleep 20 to next
+    shell: "sleep 20"
+

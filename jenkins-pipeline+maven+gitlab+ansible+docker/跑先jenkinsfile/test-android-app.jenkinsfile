@@ -1,0 +1,132 @@
+pipeline {
+  agent none
+  environment { 
+        // notice
+        dingtalk_api = 'https://oapi.dingtalk.com/robot/send?access_token=bbcff53ca028203bb5665b0dec0ea290f61907376fe99bf4e8aad294dea0f564'
+        task_type = 'RunX-Android-测试环境'
+        at_user = '15102111975'
+
+        package_env = 'ceshi'
+
+        // gitlab
+        git_url = 'http://gitlab.runxsports.com/android'
+        branch = 'test'
+        project_name = 'runxsports'
+        project_subdir = 'RunX'
+  }
+
+  stages {
+    stage('GIT SCM') {
+      agent {label 'jenkins-build'}
+      steps {
+        git branch: "${branch}",
+            credentialsId: '74776acf-37b4-4cca-a34f-1e045a82c047', 
+            url: "${git_url}/${project_name}.git"
+        // sh "git rev-parse --short HEAD > .git/commit-id"
+        script {
+          env.git_commit_id = sh (
+            script: 'git rev-parse --short HEAD',
+            returnStdout: true
+          ).trim()
+          env.git_author = sh (
+            script: "git log -1 --pretty=format:'%an'",
+            returnStdout: true
+          ).trim()
+        }
+      }
+    }
+
+    stage('Build') {
+      agent { 
+        docker { 
+          // image 'runmymind/docker-android-sdk:ubuntu-standalone'
+          label 'jenkins-build'
+          image 'daocloud.io/nekocode/docker-android'
+          args '-v /data/job_tmp/gradle/gradle:/root/.gradle -v /data/job_tmp/gradle/opt:/opt -e LANG=en_US.UTF-8 --network=host'
+          
+        }
+      }
+      steps {
+        // sh 'cd RunX && chmod +x gradlew && ./gradlew clean assembleceshi'
+        sh "cd RunX && chmod +x gradlew && ./gradlew -g /root/.gradle clean assembleRunx${package_env}"
+        androidLint pattern: '**/lint-results-*.xml'
+      }
+      post {
+        failure {
+          sh '''curl ${dingtalk_api} \
+                  -H 'Content-Type: application/json' \
+                  -d "
+                    {
+                      'at': {
+                        'atMobiles': [ '${at_user}' ]
+                      },
+                      'msgtype': 'markdown',
+                      'markdown': {
+                            'title': 'Jenkins 任务失败', 
+                            'text': '### ${task_type}-构建失败
+#### @${at_user}
+###### 执行 构建任务 
+###### 执行时间：${BUILD_TIMESTAMP}
+###### 项目名称：【 ${JOB_NAME} 】 
+###### 构建编号：${BUILD_DISPLAY_NAME}
+###### 版本编号：${git_commit_id}
+###### 版本作者：${git_author}
+###### 执行状态：**失败**
+###### 执行命令：gradlew clean assemble${package_env}
+###### 请登录Jenkins查看详细细节
+- [点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_NUMBER}/pipeline)', 
+                      }
+                    }" '''
+        }
+      }
+    }
+
+
+    stage('Artifact') { 
+      agent {label 'jenkins-build'}
+      steps {
+        archiveArtifacts artifacts: "${project_subdir}/app/build/outputs/apk/runx/${package_env}/*.apk", fingerprint: true, onlyIfSuccessful: true
+      }
+    }
+  }
+
+
+
+  post {
+    success {
+      node('master') {
+        sh '''apk_name=`cd ${JENKINS_HOME}/jobs/${JOB_NAME}/builds/${BUILD_NUMBER}/archive/${project_subdir}/app/build/outputs/apk/runx/${package_env}/ && ls *.apk`; \
+        apk_path=`cd ${JENKINS_HOME}/jobs/${JOB_NAME}/builds/${BUILD_NUMBER}/archive && ls ${project_subdir}/app/build/outputs/apk/runx/${package_env}/${apk_name}`; \
+        curl ${dingtalk_api} \
+              -H 'Content-Type: application/json' \
+              -d "
+                {
+                  'at': {
+                    'atMobiles': [ '${at_user}' ]
+                  },
+                  'msgtype': 'markdown',
+                  'markdown': {
+                      'title': 'Jenkins 任务成功', 
+                      'text': '![screenshot](http://qr.liantu.com/api.php?text=${JENKINS_URL}job/${JOB_NAME}/${BUILD_NUMBER}/artifact/${apk_path})
+### ${task_type}-构建成功
+#### @${at_user}
+###### 执行 构建任务 
+###### 执行时间：${BUILD_TIMESTAMP}
+###### 项目名称：【 ${JOB_NAME} 】 
+###### 构建编号：${BUILD_DISPLAY_NAME}
+###### 版本编号：${git_commit_id}
+###### 版本作者：${git_author}
+###### 执行状态：**成功**
+#### [【下载】${apk_name} ](${JENKINS_URL}job/${JOB_NAME}/${BUILD_NUMBER}/artifact/${apk_path})
+#### [【点击查看详情】](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_NUMBER}/pipeline)', 
+                  }
+                }" '''
+      }
+    }
+  }
+
+
+
+
+}
+

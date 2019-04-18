@@ -1,0 +1,151 @@
+---
+- name: Ansible Deploy install-netdata-agent.yml
+  hosts: prod-runx-java-provider-opt
+  # hosts: 192.168.3.250
+  remote_user: root
+  any_errors_fatal: true
+  vars:
+    version: "latest"
+
+  tasks:
+  - name: Install epel-release
+    yum:
+      name: 
+        - epel-release
+
+  - name: Install JQ and Pip and glances
+    yum:
+      name: 
+        - jq
+        - python-pip
+        - glances
+
+  - name: Install docker-py
+    pip:
+      name: docker-py
+
+  - name: Pull an NetData-Agent Image
+    docker_image:
+      name: "netdata/netdata:{{ version }}"
+      http_timeout: 300
+    register: result
+    until: result | success
+    retries: 20
+    delay: 5
+
+  - name: Get Docker PGID
+    shell: "grep docker /etc/group | cut -d ':' -f 3"
+    register: docker_pgid
+
+  - name: Start NetData Agent Container
+    docker_container:
+      name: netdata
+      hostname: "{{ ansible_hostname }}"
+      image: "netdata/netdata:{{ version }}"
+      network_mode: host
+      env:
+        PGID: "{{ docker_pgid.stdout }}"
+      restart_policy: always
+      # restart_retries: 10
+      recreate: yes
+      capabilities: SYS_PTRACE
+      security_opts: apparmor=unconfined
+      volumes:
+        - /data/usr-data:/data/usr-data
+        - /proc:/host/proc:ro
+        - /sys:/host/sys:ro
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+        - /etc/localtime:/etc/localtime
+        - /etc/timezone:/etc/timezone
+      state: started
+      command:  -W set statsd enabled no
+                -W set global timezone Asia/Shanghai 
+                -W set global 'access log' none 
+                -W set plugins tc no 
+                -W set plugins freeipmi no 
+                -W set 'plugin:proc' /proc/net/sockstat6 no 
+                -W set 'plugin:proc' /proc/net/snmp no 
+                -W set 'plugin:proc' /proc/net/snmp6 no 
+                -W set 'plugin:proc' /proc/mdstat no 
+                -W set 'plugin:proc' /proc/net/ip_vs/stats no 
+                -W set 'plugin:proc' /proc/net/stat/synproxy no 
+                -W set 'plugin:proc' /proc/net/rpc/nfs no 
+                -W set 'plugin:proc' /proc/net/rpc/nfsd no 
+                -W set 'plugin:proc' /proc/interrupts no 
+                -W set 'plugin:proc:/proc/stat' 'cpu interrupts' no 
+                -W set 'plugin:proc:/proc/net/netstat' 'ECN packets' no 
+                -W set 'plugin:proc' /proc/softirqs no 
+                -W set 'plugin:proc' /proc/sys/kernel/random/entropy_avail no 
+                -W set 'plugin:proc' /sys/class/power_supply no 
+                -W set 'plugin:proc' /sys/kernel/mm/ksm no 
+                -W set 'plugin:proc' /sys/devices/system/edac/mc no 
+                -W set 'plugin:proc' /sys/devices/system/node no 
+                -W set 'plugin:proc' 'netdata server resources' no 
+                -W set 'plugin:cgroups' 'enable systemd services' no 
+                -W set 'ntpd_local.sys_stratum' enabled no 
+                -W set 'ntpd_local.sys_rootdelay' enabled no 
+                -W set 'ntpd_local.sys_wander' enabled no 
+                -W set 'ntpd_local.sys_frequency' enabled no 
+                -W set 'ntpd_local.sys_rootdisp' enabled no 
+                -W set 'ntpd_local.sys_tc' enabled no 
+                -W set 'ntpd_local.sys_jitter' enabled no 
+                -W set 'ntpd_local.sys_offset' enabled no 
+                -W set 'ntpd_local.sys_precision' enabled no 
+                -W set 'netdata.runtime_ntpd_local' enabled no 
+                -W set 'plugin:cgroups' 'enable cgroup netdata' no 
+                -W set 'netdata.plugin_cgroups_cpu' enabled no 
+                -W set 'apps.vmem' enabled no 
+                -W set 'apps.cpu_user' enabled no 
+                -W set 'apps.cpu_system' enabled no 
+                -W set 'apps.swap' enabled no 
+                -W set 'apps.preads' enabled no 
+                -W set 'apps.pwrites' enabled no 
+                -W set 'apps.lreads' enabled no 
+                -W set 'apps.lwrites' enabled no 
+                -W set 'apps.minor_faults' enabled no 
+                -W set 'apps.major_faults' enabled no 
+                -W set 'users.cpu' enabled no 
+                -W set 'users.mem' enabled no 
+                -W set 'users.vmem' enabled no 
+                -W set 'users.cpu_user' enabled no 
+                -W set 'users.cpu_system' enabled no 
+                -W set 'users.swap' enabled no 
+                -W set 'users.preads' enabled no 
+                -W set 'users.pwrites' enabled no 
+                -W set 'users.lreads' enabled no 
+                -W set 'users.lwrites' enabled no 
+                -W set 'users.minor_faults' enabled no 
+                -W set 'users.major_faults' enabled no 
+                -W set 'users.threads' enabled no 
+                -W set 'users.processes' enabled no 
+                -W set 'users.files' enabled no 
+                -W set 'users.sockets' enabled no 
+                -W set 'users.pipes' enabled no 
+                -W set 'groups.cpu' enabled no 
+                -W set 'groups.mem' enabled no 
+                -W set 'groups.vmem' enabled no 
+                -W set 'groups.cpu_user' enabled no 
+                -W set 'groups.cpu_system' enabled no 
+                -W set 'groups.swap' enabled no 
+                -W set 'groups.preads' enabled no 
+                -W set 'groups.pwrites' enabled no 
+                -W set 'groups.lreads' enabled no 
+                -W set 'groups.lwrites' enabled no 
+                -W set 'groups.minor_faults' enabled no 
+                -W set 'groups.major_faults' enabled no 
+                -W set 'groups.threads' enabled no 
+                -W set 'groups.processes' enabled no 
+                -W set 'groups.files' enabled no 
+                -W set 'groups.sockets' enabled no 
+                -W set 'groups.pipes' enabled no 
+
+  - name: Wait for netdata container up
+    wait_for: 
+      port: 19999
+      timeout: 120
+      msg: 19999 Port startup failed of the 120 seconds
+
+  # - name: Remove NetData Agent Container
+  #   docker_container:
+  #     name: netdata
+  #     state: absent

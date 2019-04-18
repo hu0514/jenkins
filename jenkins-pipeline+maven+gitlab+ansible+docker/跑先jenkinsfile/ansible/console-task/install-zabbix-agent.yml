@@ -1,0 +1,78 @@
+---
+- name: Ansible Deploy install-zabbix-agent.yml
+  hosts: prod-runx-java-provider-opt
+  # hosts: 192.168.3.250
+  remote_user: root
+  any_errors_fatal: true
+  vars:
+    version: "centos-3.4.8"
+
+  tasks:
+  - name: Install epel-release
+    yum:
+      name: 
+        - epel-release
+
+  - name: Install JQ and Pip and glances
+    yum:
+      name: 
+        - jq
+        - python-pip
+        - glances
+
+  - name: Install docker-py
+    pip:
+      name: docker-py
+
+  - name: Chmod Docker Sock 
+    file:
+      path: /var/run/docker.sock
+      mode: 0666
+
+  - name: Chmod Messages File 
+    file:
+      path: /var/log/messages
+      mode: 0666
+
+  - name: Pull an Zabbix-Agent Image
+    docker_image:
+      name: "zabbix/zabbix-agent:{{ version }}"
+      http_timeout: 300
+    register: result
+    until: result | success
+    retries: 20
+    delay: 5
+
+  - name: Start Zabbix Agent Container
+    docker_container:
+      name: zabbix-agent
+      image: "zabbix/zabbix-agent:{{ version }}"
+      network_mode: host
+      env:
+        ZBX_SERVER_HOST: zabbix-server.runxsports.com
+        ZBX_METADATA: "{{ ansible_default_ipv4.address }}"
+        ZBX_ENABLEREMOTECOMMANDS: 1
+      privileged: yes
+      restart_policy: always
+      # restart_retries: 10
+      recreate: yes
+      volumes:
+        - /data/usr-data:/data/usr-data
+        - /usr/bin/docker:/usr/bin/docker
+        - /var/run/docker.sock:/var/run/docker.sock
+        - /usr/lib64/libltdl.so.7:/usr/lib64/libltdl.so.7
+        - /var/log:/var/system-log
+        - /etc/timezone:/etc/timezone
+        - /etc/localtime:/etc/localtime
+      state: started
+
+  - name: Wait for zabbix-agent container up
+    wait_for: 
+      port: 10050
+      timeout: 120
+      msg: 10050 Port startup failed of the 120 seconds
+
+  # - name: Remove Zabbix Agent Container
+  #   docker_container:
+  #     name: zabbix-agent
+  #     state: absent

@@ -1,0 +1,25 @@
+---
+- name: Ansible Deploy
+  vars:
+    host: "{{ lookup('env','JOB_NAME') }}"
+    work_path: "{{ lookup('env','WORKSPACE') }}"
+    package_name: "{{ lookup('env','JOB_NAME') }}"
+    project_path: "{{ lookup('env','project_path') }}"
+  hosts: "{{ host }}"
+  remote_user: root
+  gather_facts: false
+  any_errors_fatal: false
+
+  tasks:
+  - name: Create project directory
+    file:
+      path: "{{ project_path }}"
+      state: directory
+
+  - name: Send Project Package {{ package_name }}.tar.gz
+    unarchive:
+      src: "{{ work_path }}/{{ package_name }}.tar.gz"
+      dest: "{{ project_path }}"
+      owner: root
+      group: root
+

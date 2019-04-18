@@ -1,0 +1,266 @@
+---
+- name: Ansible Deploy test-logstash-task.yml
+  vars:
+    host: "{{ lookup('env','JOB_NAME') }}"
+    fluentd_folder: "{{ lookup('env','log_folder') }}"
+    fluentd_project: "{{ lookup('env','JOB_BASE_NAME') }}"
+    work_path: "{{ lookup('env','WORKSPACE') }}"
+    package_name: "{{ lookup('env','JOB_NAME') }}"
+    project_path: "{{ lookup('env','project_path') }}"
+    branch: "{{ lookup('env','branch') }}"
+
+    db_url: "{{ lookup('env','db_url') }}"
+    db_username: "{{ lookup('env','db_username') }}"
+    db_password: "{{ lookup('env','db_password') }}"
+
+    # DB_PAGE_COUNT_MAX: 100000
+    # DB_PAGE_COUNT_MID: 50000
+    # DB_PAGE_COUNT_MIN: 20000
+    DB_PAGE_COUNT_MAX: 2000
+    DB_PAGE_COUNT_MID: 1000
+    DB_PAGE_COUNT_MIN: 500
+
+    DB_ENABLED_PAGE_MAX: "false"
+    DB_ENABLED_PAGE_MID: "false"
+    DB_ENABLED_PAGE_MIN: "false"
+    DB_PAGE_SIZE_MAX: 1000
+    DB_PAGE_SIZE_MID: 500
+    DB_PAGE_SIZE_MIN: 200
+
+    fluentd_version: v1.2.6
+    fluentd_config: test-fluent-client.conf
+    logstash_image: docker.elastic.co/logstash/logstash:6.5.4
+  hosts: "{{ host }}"
+  remote_user: root
+  # gather_facts: false
+  any_errors_fatal: false
+
+  tasks:
+  - name: Print Host Name
+    debug:
+      msg: "{{ ansible_hostname }}"
+
+  - name: Install epel-release
+    yum:
+      name: 
+        - epel-release
+
+  - name: Install JQ and Pip and glances and rsync
+    yum:
+      name: 
+        - jq
+        - python-pip
+        - glances
+        - rsync
+
+  - name: Install docker-py
+    pip:
+      name: docker-py
+
+  - name: Create project directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      owner: 1000
+      group: 1000
+    with_items:
+      - "{{ project_path }}/data"
+      - "{{ project_path }}/logs"
+
+  - name: Send Mysql Jar
+    copy:
+      src: "{{ work_path }}/mysql-connector-java-8.0.11.jar"
+      dest: "{{ project_path }}"
+      owner: 1000
+      group: 1000
+
+  - name: Send Pipelines.yml
+    copy:
+      src: "{{ work_path }}/pipelines.yml"
+      dest: "{{ project_path }}"
+      owner: 1000
+      group: 1000
+
+  - name: Send jvm.options
+    template:
+      src: "{{ work_path }}/jvm.options"
+      dest: "{{ project_path }}"
+      owner: 1000
+      group: 1000
+
+  - name: Create tmp directory
+    file:
+      path: "{{ item }}"
+      state: directory
+    with_items:
+      - /root/tmp/template
+      - /root/tmp/sql
+      - /root/tmp/pipelines
+
+  - name: Send SQL Conf
+    template:
+      src: "{{ item }}"
+      dest: "/root/tmp/sql"
+      owner: 1000
+      group: 1000
+    with_fileglob:
+      - "{{ work_path }}/sql/*"
+
+  - name: Send Pipelines and Template Conf
+    copy:
+      src: "{{ work_path }}/{{ item }}"
+      dest: "/root/tmp/"
+      owner: 1000
+      group: 1000
+    with_items:
+      - template
+      - pipelines
+
+  - name: Rsync Template Conf
+    shell: "rsync -av --delete /root/tmp/{{ item }}/ {{ project_path }}/{{ item }}"
+    with_items:
+      - template
+      - pipelines
+      - sql
+
+  - name: Remove tmp directory
+    file:
+      path: "/root/tmp"
+      state: absent
+
+  - name: Create Fluentd Config Directory
+    file:
+      path: /data/usr-data/fluentd
+      state: directory
+
+  - name: Send Fluentd Config file
+    copy:
+      src: "/data/ansible/fluentd/{{ fluentd_config }}"
+      dest: /data/usr-data/fluentd/fluent-client.conf
+
+  - name: Start Fluentd Client
+    docker_container:
+      name: "fluentd-client"
+      image: "fluent/fluentd:{{ fluentd_version }}"
+      network_mode: host
+      restart_policy: always
+      state: started
+      recreate: yes
+      volumes:
+        - /data/usr-data/fluentd/fluent-client.conf:/fluentd/etc/fluent.conf
+        - /etc/localtime:/etc/localtime
+
+  - name: Wait for fluentd container up
+    wait_for: 
+      port: 24224
+      timeout: 120
+      msg: 24224 Port startup failed of the 120 seconds
+
+  # - name: Remove logs files from file_lists
+  #   file:
+  #     path: "{{ item }}"
+  #     state: absent
+  #   with_fileglob:
+  #       - "{{ project_path }}/logs/*"
+
+  - name: Remove All Logstash Container
+    docker:
+      image: "{{ logstash_image }}"
+      state: absent
+
+  - name: Start Logstash Docker Container
+    docker_container:
+      name: "{{ ansible_hostname }}"
+      image: "{{ logstash_image }}"
+      network_mode: host
+      restart_policy: always
+      # memory: 900M
+      state: started
+      recreate: yes
+      log_driver: fluentd
+      log_options:
+        fluentd-address: "localhost:24224"
+        fluentd-async-connect: "true"
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "3000"
+        env: "fluentd-folder,fluentd-project"
+      volumes:
+        - "{{ project_path }}:{{ project_path }}"
+        - "{{ project_path }}/pipelines.yml:/usr/share/logstash/config/pipelines.yml"
+        - "{{ project_path }}/jvm.options:/usr/share/logstash/config/jvm.options"
+        - /etc/timezone:/etc/timezone
+        - /etc/localtime:/etc/localtime
+      env:
+        fluentd-folder: "{{ fluentd_folder }}"
+        fluentd-project: "{{ fluentd_project }}"
+        PATH_DATA: "{{ project_path }}/data"
+        PATH_LOGS: "{{ project_path }}/logs"
+        XPACK_MONITORING_ELASTICSEARCH_URL: "http://test-es-1.runxsports.com:9200,http://test-es-2.runxsports.com:9200"
+        XPACK_MONITORING_ENABLED: "true"
+        CONFIG_RELOAD_AUTOMATIC: "true"
+        LOG_LEVEL: "info"
+        BRANCH: "{{ branch }}"
+        SQL_PATH: "{{ project_path }}/sql"
+        TEMPLATE_PATH: "{{ project_path }}/template"
+        LAST_METADATA_PATH: "{{ project_path }}/logs"
+        ES_URL: "http://test-es-1.runxsports.com:9200,http://test-es-2.runxsports.com:9200"
+        DB_LIB: "{{ project_path }}/mysql-connector-java-8.0.11.jar"
+        DB_CLASS: "com.mysql.jdbc.Driver"
+        DB_URL: "{{ db_url }}"
+        DB_USERNAME: "{{ db_username }}"
+        DB_PASSWORD: "{{ db_password }}"
+        DB_TIMEZONE: "Asia/Shanghai"
+        DB_ENABLED_PAGE_MAX: "{{ DB_ENABLED_PAGE_MAX }}"
+        DB_ENABLED_PAGE_MID: "{{ DB_ENABLED_PAGE_MID }}"
+        DB_ENABLED_PAGE_MIN: "{{ DB_ENABLED_PAGE_MIN }}"
+        DB_PAGE_SIZE_MAX: "{{ DB_PAGE_SIZE_MAX }}"
+        DB_PAGE_SIZE_MID: "{{ DB_PAGE_SIZE_MID }}"
+        DB_PAGE_SIZE_MIN: "{{ DB_PAGE_SIZE_MIN }}"
+        # LS_JAVA_OPTS: "-XX:MetaspaceSize=200m -XX:MaxMetaspaceSize=200m"
+
+  - name: Wait for logstash container up
+    wait_for: 
+      port: 9600
+      timeout: 3600
+      msg: 9600 Port startup failed of the 3600 seconds
+
+  - name: Reload logstash-rsync-logs Container
+    docker_container:
+      name: "logstash-rsync-logs"
+      image: qq79428316/club-rsync
+      network_mode: host
+      command: sh -c "while true; do rsync -a --delete {{ project_path }}/logs/ root@rsyncd-logs.runxsports.com::java-logs/{{ fluentd_folder }}/{{ fluentd_project }}/logs; sleep 30; done"
+      restart_policy: always
+      state: started
+      recreate: yes
+      volumes:
+        - /data/usr-data:/data/usr-data
+
+  - name: Get Logstash Service Status 
+    uri:
+      url: "http://127.0.0.1:9600"
+      method: GET
+      return_content: yes
+      status_code: 200
+    register: result
+    until: result.status is defined and result.status == 200
+    retries: 10
+    delay: 5
+
+  - name: Print Logstash Service Status
+    debug:
+      msg: "{{ result }}"
+
+  # - name: Send Jstatd Config file
+  #   copy:
+  #     src: /data/ansible/java/jstatd.policy
+  #     dest: "{{ project_path }}/jstatd.policy"
+
+  # - name: Run Jstatd
+  #   shell: "docker exec {{ ansible_hostname }} nohup jstatd -p10003 -J-Djava.security.policy={{ project_path }}/jstatd.policy &"
+
+  # - name: Wait for Jstatd up
+  #   wait_for: 
+  #     port: 10003
+  #     timeout: 120
+  #     msg: 10003 Port startup failed of the 120 seconds

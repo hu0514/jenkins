@@ -4,7 +4,7 @@ docker pull jenkinsci/blueocean
 使用docker run 生成容器
 docker run -d \
     -u root \
-    --name jenkins2 \
+    --name jenkins \
     --network host \
     -v /data/jenkins/data:/var/jenkins_home \
     -v /data/jenkins/docker.sock:/var/run/docker.sock \

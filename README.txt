@@ -7,7 +7,7 @@ docker run -d \
     --name jenkins \
     --network host \
     -v /data/jenkins/data:/var/jenkins_home \
-    -v /data/jenkins/docker.sock:/var/run/docker.sock \
+    -v /var/run/docker.sock:/var/run/docker.sock \
     -v /etc/localtime:/etc/localtime \
     -v /etc/timezone:/etc/timezone \
     -v "$HOME:/home" \

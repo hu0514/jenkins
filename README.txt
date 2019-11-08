@@ -18,3 +18,7 @@ docker run -d \
 
 查看初始密码
 docker logs jenkins 
+
+
+修改JENKINS_URL变量
+jenkins.model.JenkinsLocationConfiguration.xml

@@ -1,0 +1,104 @@
+---
+- name: Ansible Deploy test-kefu-node.yml
+  vars:
+   host: "{{ lookup('env','JOB_NAME') }}"
+   job_name: "{{ lookup('env','JOB_NAME') }}"
+   package_name: "{{lookup('env','JOB_NAME') }}"
+   project_path: "{{lookup('env','project_path')}}"
+  hosts: "{{host}}"
+  remote_user: root
+  tasks:
+   - name: Print Host Name
+     debug: msg={{  ansible_nodename  }}
+   - name: Install epel-release
+     yum: 
+      name: epel-release 
+      state: present
+   - name: Install pip
+     yum: 
+      name: 
+       - python-pip
+       - glances
+       - jq 
+      state: present
+
+   - name: Install docker-py 
+     pip:
+       name: docker-py
+
+   - name: Get docker-ce.repo
+     get_url: url=https://download.docker.com/linux/centos/docker-ce.repo dest=/etc/yum.repos.d/docker-ce.repo
+
+   - name: Install Docker
+     yum: 
+      name: "{{item}}" 
+      state: present
+      update_cache: yes
+     with_items:
+      - yum-utils
+      - device-mapper-persistent-data
+      - lvm2
+      - containerd.io
+      - docker-ce-cli
+      - docker-ce
+
+   - name: Start Docker Service
+     service: 
+      name: docker 
+      state: started
+   - name: Pull An Python Image version=3.7.5
+     docker_image:
+      name: 18817810841/python:3.7.5
+     register: result
+     until: result | success
+     retries: 20
+     delay: 5
+
+   - name: Install Rsync
+     yum:
+      name: rsync
+      state: present
+   - name: Create project directory
+     file:
+      path: "{{project_path}}"
+      state: directory
+   - name: Create Temp directory
+     file:
+      path: "/tmp/{{project_path}}"
+      state: directory
+   - name: Sent project package
+     unarchive:
+      src: "/data/workspace/{{job_name}}/{{package_name}}.tar.gz"
+      dest: "/tmp/{{project_path}}"
+   - name: Rsync code
+     shell: "rsync -av --delete /tmp/{{project_path}}/ {{project_path}}"
+     register: rsyncresult
+   - name: Print rsync status
+     debug:
+      msg: "{{rsyncresult.stdout_lines}}"
+   - name: Remove tmp directory
+     file:
+      path: /tmp/tmpdirectory
+      state: absent
+   - name: Run a Sanic Container
+     docker_container:
+      name: "{{job_name}}"
+      image: 18817810841/python:3.7.5
+      network_mode: host
+      restart_policy: on-failure
+      restart_retries: 1
+      env:
+        PYPI_DOMAIN: "http://pypi.example.com/repository/pypi-group/simple"
+        PYPI_OPTION: "--trusted-host pypi.example.com"
+      volumes:
+       - "/data:/data"
+      working_dir: "{{project_path}}"
+      command: sanic_start.py -app admin_api -env local
+
+   - name: Wait For Sanic Container Up
+     wait_for:
+      port: 30001
+      state: started
+      timeout: 120
+   - name: Sleep 20 to next
+     shell: "sleep 20"

@@ -1,0 +1,186 @@
+pipeline{
+    agent none
+    environment{
+        //dingding
+        def DINGTALK_TOKEN='2e7a689bd8794a2149d297d7f72a3f68f6023100acd4626cac0f35553730862c'  
+        def AtUser='18817810841'
+        // gitlab 
+        def GIT_URL='http://gitlab.leisu.com/leisu/ios/leisu_ios.git'
+        def BRANCH='master'
+        def GIT_CRED_ID='53cf5e6f-4ab4-40b2-8577-f9385c1096d0'
+        //ipa
+        def project_subdir='leisu_ios'
+    }
+    stages{
+        stage('get code'){
+            agent {label 'ios2'}
+            steps{
+                    git (
+                        credentialsId: GIT_CRED_ID,
+                        branch: BRANCH,
+                        url: GIT_URL,
+                        changelog: true
+                    )
+                    script{
+                        env.git_commit_id=sh(
+                            script: 'git rev-parse --short HEAD',
+                            returnStdout:true
+                        ).trim()
+                        env.git_author=sh(
+                            script: "git log -1 --pretty=format:'%an'",
+                            returnStdout:true
+                        ).trim()
+                    }               
+            }
+        }
+        stage('build'){
+            agent {label 'ios2'}
+            steps{
+                sh """
+                    security -v unlock-keychain -p "apple"
+                    xcodebuild archive -project ${project_subdir}.xcodeproj   -scheme ${project_subdir} -archivePath   build/${project_subdir}.xcarchive
+                """
+            }
+            post{
+                failure{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-构建${currentBuild.currentResult}",
+                                "text":"### ${JOB_NAME}-构建${currentBuild.currentResult}
+##### 执行任务: IOS打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
+                }
+            }
+        }
+        stage('develop'){
+            agent {label 'ios2'}
+            steps{
+                sh """
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                    -H 'Content-Type: application/json' \
+                    -d '
+                    {"msgtype": "markdown",
+                        "markdown": {"title":"请登录jnekins确认是否发布${JOB_NAME}",
+                            "text":"### ${JOB_NAME}-构建${currentBuild.currentResult} 
+##### 执行任务: 测试+构建+部署 
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP} 
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME} 
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+&nbsp;&nbsp;
+##### **@${AtUser}**
+#### 请登录jnekins确认是否发布
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                        },
+                        "at":{
+                            "atMobiles":[
+                                ${AtUser}
+                            ],
+                            "isAtAll":false
+                        }
+                    }
+                    '
+                """  
+                input(
+                    id: '立即发布',
+                    message: '是否立即发布GIT版本编号'+git_commit_id+'的版本到'+BRANCH+'环境吗?',
+                    ok: '立即发布.',
+                )
+                sh """
+                    xcodebuild -exportArchive -archivePath   build/${project_subdir}.xcarchive -exportPath  build/${project_subdir}.ipa -exportOptionsPlist   build/${project_subdir}.xcarchive/Info.plist -allowProvisioningUpdates
+                """
+                script{
+                    env.ipa_name=sh(
+                        script: "ls build/${project_subdir}.ipa/*.ipa",
+                        returnStdout: true
+                    ).trim()
+                }
+                archiveArtifacts artifacts: "build/${project_subdir}.ipa/*.ipa", fingerprint: true, onlyIfSuccessful: true
+            }
+            post{
+                failure{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-打包${currentBuild.currentResult}",
+                                "text":"### ${JOB_NAME}-打包${currentBuild.currentResult}
+##### 执行任务: IOS打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
+                }
+                success{
+                    sh """
+                    curl 'https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '
+                        {"msgtype": "markdown",
+                            "markdown": {"title":"${JOB_NAME}-打包${currentBuild.currentResult}",
+                                "text":"![screenshot](https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${JENKINS_URL}job/${JOB_NAME}/${BUILD_NUMBER}/artifact/${ipa_name})
+### ${JOB_NAME}-打包${currentBuild.currentResult}
+##### 执行任务: IOS打包
+&nbsp;&nbsp;
+##### 构建时间: ${BUILD_TIMESTAMP}
+&nbsp;&nbsp;
+##### 项目名称: ${JOB_NAME}
+&nbsp;&nbsp;
+##### 构建编号: ${BUILD_DISPLAY_NAME}
+&nbsp;&nbsp;
+##### 版本编号: ${git_commit_id}
+&nbsp;&nbsp;
+##### 版本作者: ${git_author} 
+&nbsp;&nbsp;
+##### 版本状态: ${currentBuild.currentResult} 
+[点击查看](${JENKINS_URL}blue/organizations/jenkins/${JOB_NAME}/detail/${JOB_NAME}/${BUILD_ID})"
+                            }
+                        }
+                        '
+                    """
+                }
+            }
+        }
+    }
+}
